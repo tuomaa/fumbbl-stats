@@ -8,15 +8,8 @@ import urllib
 class TopPlayers:
     def __init__(self):
 
-        # Init the database connection
-        self.conn = sqlite3.connect(':memory:')
-        self.cur = self.conn.cursor()
-        self.ex = self.cur.execute
-
-        self.initDatabase()
-
-        # Data related variables
-        self.matchList = None
+        # Init variables etc.
+        ####
 
         # URL TEMPLATES
         # set :tournamentId to get matches for the tournament
@@ -24,10 +17,32 @@ class TopPlayers:
         # set :groupId to get matches for the group
         self.urlTemplateGroup = 'http://fumbbl.com/xml:group?id=%(groupId)s&op=matches'
 
+        # Define the SQL statements here
+        self.createPlayersTableSql = 'CREATE TABLE players (id TEXT, teamid TEXT, spp INT, completions INT, touchdowns INT, interceptions INT, casualties INT, mvps INT, passing INT, rushing INT, blocks INT, fouls INT, turns INT)'
+        self.createCalcStatsTableSql = 'CREATE TABLE calculatedStats(player TEXT, team TEXT, scoringThrower INT, blockingScorer INT, blockingThrower INT, triple INT, allRounder INT)'
+
+        # Data related variables
+        self.matchList = None
+
+
+        # Init the database, etc.
+        ####
+
+        # Init the database connection
+        self.conn = sqlite3.connect(':memory:')
+        self.cur = self.conn.cursor()
+        self.ex = self.cur.execute
+
+        self.initDatabase()
+
+
     def initDatabase(self):
         # Create the player table
-        createPlayersTableSql = 'CREATE TABLE players (id TEXT, teamid TEXT, spp INT, completions INT, touchdowns INT, interceptions INT, casualties INT, mvps INT, passing INT, rushing INT, blocks INT, fouls INT, turns INT)'
-        self.ex(createPlayersTableSql)
+        self.ex(self.createPlayersTableSql)
+        
+        # Create table for the calculated statistics
+        self.ex(self.createCalcStatsTableSql)
+
 
     def resetDatabase(self):
         self.ex('DROP TABLE players')
@@ -50,7 +65,7 @@ class TopPlayers:
             root = ET.fromstring(matchXml)
             self.matchList = root.findall(".//matches/match")
             # process the match data
-            self.loopMatches()
+            self.processMatches()
 
     def getGroupMatchData(self, groups):
         for group in groups:
@@ -63,7 +78,7 @@ class TopPlayers:
             root = ET.fromstring(matchXml)
             self.matchList = root.findall(".//matches/match")
             # process the match data
-            self.loopMatches()
+            self.processMatches()
 
     def fetchUrl(self, url):
         u = urllib.urlopen(url)
@@ -71,7 +86,7 @@ class TopPlayers:
         u.close()
         return buf
 
-    def loopMatches(self):
+    def processMatches(self):
         totalMatches = len(self.matchList)
         currentMatch = 0
         for match in self.matchList:
@@ -148,14 +163,68 @@ class TopPlayers:
             else:
                 #  add to the existing info
                 self.ex(updatePlayerSql, playerDict)
-    
+
+    def calculateSpecialStats(self):
+        # get list of the player performance tuples
+        selectPlayersSql = 'SELECT * from players'
+        playerList = self.ex(selectPlayersSql).fetchall()
+
+        # for each player
+        for player in playerList:
+
+            # get the relevant numbers
+            completions = player[3]
+            touchdowns = player[4]
+            intercepts = player[5]
+            casualties = player[6]
+
+            # calculate the statistics
+            scoringThrower = min(touchdowns, completions)
+            blockingScorer = min(casualties, touchdowns)
+            blockingThrower = min(casualties, completions)
+            triple = min(completions, touchdowns, casualties)
+            allRounder = min(completions, touchdowns, casualties, intercepts)
+
+            # construct the dict
+            statsDict = { 'player': player[0],
+                          'team': player[1],
+                          'scoringThrower': scoringThrower,
+                          'blockingScorer': blockingScorer,
+                          'blockingThrower': blockingThrower,
+                          'triple': triple,
+                          'allRounder': allRounder }
+
+            # insert the stats to the table
+            insertPlayerStatsSql = 'INSERT INTO calculatedStats values( :player, :team, :scoringThrower, :blockingScorer, :blockingThrower, :triple, :allRounder )'
+            self.ex(insertPlayerStatsSql, statsDict)
+
+    def resetSpecialStats(self):
+        # drop the calculated stats table
+        self.ex('DROP TABLE calculatedStats')
+        # and re-create it
+        self.ex(self.createCalcStatsTableSql)
+
+    def getTopSpecialStats(self):
+        selectTopScoringThrowerSql = 'SELECT * FROM calculatedStats WHERE scoringThrower = (SELECT MAX(scoringThrower) FROM calculatedStats)'
+        selectTopBlockingThrowerSql = 'SELECT * FROM calculatedStats WHERE blockingThrower = (SELECT MAX(blockingThrower) FROM calculatedStats)'
+        selectTopBlockingScorerSql = 'SELECT * FROM calculatedStats WHERE blockingScorer = (SELECT MAX(blockingScorer) FROM calculatedStats)'
+        selectTopTripleSql = 'SELECT * FROM calculatedStats WHERE triple = (SELECT MAX(triple) FROM calculatedStats)'
+        selectTopAllRounderSql = 'SELECT * FROM calculatedStats WHERE allRounder = (SELECT MAX(allRounder) FROM calculatedStats)'
+
+        #self.ex(selectTopScoringThrowerSql).fetchall()
+        #self.ex(selectTopBlockingThrowerSql).fetchall()
+        #self.ex(selectTopBlockingScorerSql).fetchall()
+        #self.ex(selectTopTripleSql).fetchall()
+        #self.ex(selectTopAllRounderSql).fetchall()
+
+
 
 if __name__ == '__main__':
 
     # create the TopPlayers
     ts = TopPlayers()
     #ts.readMatchData()
-    #ts.loopMatches()
+    #ts.processMatches()
     
     # Get data for groups
     #groupsToGet = ('8000', '8001')
