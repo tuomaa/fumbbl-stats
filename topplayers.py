@@ -22,6 +22,7 @@ class TopPlayers:
         # Define the SQL statements here
         self.createPlayersTableSql = 'CREATE TABLE players (id TEXT, teamid TEXT, spp INT, completions INT, touchdowns INT, interceptions INT, casualties INT, mvps INT, passing INT, rushing INT, blocks INT, fouls INT, turns INT)'
         self.createCalcStatsTableSql = 'CREATE TABLE calculatedStats(player TEXT, team TEXT, scoringThrower INT, blockingScorer INT, blockingThrower INT, triple INT, allRounder INT)'
+        self.createNameTableSql = 'CREATE TABLE names(playerId TEXT, teamId TEXT, playerName TEXT, teamName TEXT)'
 
         # Data related variables
         self.matchList = None
@@ -44,6 +45,9 @@ class TopPlayers:
         
         # Create table for the calculated statistics
         self.ex(self.createCalcStatsTableSql)
+
+        # Create table for storing the player/team names
+        self.ex(self.createNameTableSql)
 
 
     def resetDatabase(self):
@@ -216,6 +220,43 @@ class TopPlayers:
         # and re-create it
         self.ex(self.createCalcStatsTableSql)
 
+    def getTopStats(self):
+        self.printStat(2, 'spp')
+        self.printStat(3, 'completions')
+        self.printStat(4, 'touchdowns')
+        self.printStat(5, 'interceptions')
+        self.printStat(6, 'casualties')
+        self.printStat(7, 'mvps')
+        self.printStat(8, 'passing')
+        self.printStat(9, 'rushing')
+        self.printStat(10, 'blocks')
+        self.printStat(11, 'fouls')
+        #self.printStat(12, 'turns')
+
+    def printStat(self, statIndex, stat):
+        """ The stat names and indexes
+            2, 'spp'
+            3, 'completions'
+            4, 'touchdowns'
+            5, 'interceptions'
+            6, 'casualties'
+            7, 'mvps'
+            8, 'passing'
+            9, 'rushing'
+           10, 'blocks'
+           11, 'fouls'
+           12, 'turns'
+        """
+        # set :stat
+        selectTopSql = 'SELECT * FROM players WHERE %(stat)s = (SELECT MAX(%(stat)s) FROM players)'
+        topPlayers = self.ex(selectTopSql % {'stat': stat}).fetchall()
+
+        for player in topPlayers:
+            (name, team) = self.getPlayerTeamNames(player[0], player[1])
+            topValue = player[statIndex]
+            print "Top", stat, name, "(", team, ") ", "#", topValue
+
+
     def getTopSpecialStats(self):
         selectTopScoringThrowerSql = 'SELECT * FROM calculatedStats WHERE scoringThrower = (SELECT MAX(scoringThrower) FROM calculatedStats)'
         selectTopBlockingThrowerSql = 'SELECT * FROM calculatedStats WHERE blockingThrower = (SELECT MAX(blockingThrower) FROM calculatedStats)'
@@ -262,15 +303,46 @@ class TopPlayers:
         #    print "Top3 Triple:", name, "(", team, ") ", "#", val
 
     def getPlayerTeamNames(self, playerId, teamId):
+        # first check if we already have the player/team names fetched
+
+        # set :playerId
+        selectNameSql = 'SELECT playerName,teamName FROM names WHERE playerId=%(playerId)s'
+
+        names = self.ex(selectNameSql % {'playerId': playerId}).fetchone()
+        if names:
+            #print "Found some names", names
+            return names
+
+        #print "Names not found, fetching"
+
         # get the team xml
         teamTree = self.getTeamData(teamId)
         # get the team name
         teamName = teamTree.find('name').text
         # search for the player name
-        playerNameXPath = './/player[@id="%(playerId)s"]/name' % {'playerId': playerId}
-        playerName = teamTree.findall(playerNameXPath)[0].text
+        #playerNameXPath = './/player[@id="%(playerId)s"]/name' % {'playerId': playerId}
+        #playerName = teamTree.findall(playerNameXPath)[0].text
 
-        return (playerName, teamName)
+        # instead of getting the single player name, parse all the players and names to the db
+        players = teamTree.findall(".//player")
+        #print "found", len(players), "players"
+        playerName = ''
+        for player in players:
+            plrName = player.find('name').text
+            plrId = player.get('id')
+
+            #print "inserting name:", plrName, "(",plrId,")", teamName, "(", teamId, ")"
+
+            insertNamesSql = 'INSERT INTO names VALUES( :playerId, :teamId, :playerName, :teamName )'
+            namesDict = { 'playerId': plrId,
+                          'teamId': teamId,
+                          'playerName': plrName,
+                          'teamName': teamName }
+            self.ex(insertNamesSql, namesDict)
+
+        # now we should have it, try again
+        names = self.ex(selectNameSql % {'playerId': playerId}).fetchone()
+        return names
 
     def getPlayerUrl(self, playerId):
         return 'http://fumbbl.com/FUMBBL.php?page=player&player_id=' + playerId
@@ -293,6 +365,9 @@ if __name__ == '__main__':
     # Get data for groups
     groupsToGet = ('8011', '8341')
     ts.getGroupMatchData(groupsToGet)
+
+    # print out the stats
+    ts.getTopStats()
 
     # calculate the special stats
     ts.calculateSpecialStats()
