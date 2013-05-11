@@ -16,6 +16,8 @@ class TopPlayers:
         self.urlTemplateTournament = 'http://fumbbl.com/xml:group?id=%(tournamentId)s&op=matches'
         # set :groupId to get matches for the group
         self.urlTemplateGroup = 'http://fumbbl.com/xml:group?id=%(groupId)s&op=matches'
+        # set :teamId
+        self.urlTemplateTeam = 'http://fumbbl.com/xml:team?id=%(teamId)s&past=1'
 
         # Define the SQL statements here
         self.createPlayersTableSql = 'CREATE TABLE players (id TEXT, teamid TEXT, spp INT, completions INT, touchdowns INT, interceptions INT, casualties INT, mvps INT, passing INT, rushing INT, blocks INT, fouls INT, turns INT)'
@@ -79,6 +81,16 @@ class TopPlayers:
             self.matchList = root.findall(".//matches/match")
             # process the match data
             self.processMatches()
+
+    def getTeamData(self, teamId):
+        # first fetch the team info from FUMBBL API
+        reqUrl = self.urlTemplateTeam % {'teamId': teamId}
+        teamXml = self.fetchUrl(reqUrl)
+
+        # parse the xml
+        root = ET.fromstring(teamXml)
+        return root
+        
 
     def fetchUrl(self, url):
         u = urllib.urlopen(url)
@@ -211,12 +223,64 @@ class TopPlayers:
         selectTopTripleSql = 'SELECT * FROM calculatedStats WHERE triple = (SELECT MAX(triple) FROM calculatedStats)'
         selectTopAllRounderSql = 'SELECT * FROM calculatedStats WHERE allRounder = (SELECT MAX(allRounder) FROM calculatedStats)'
 
-        #self.ex(selectTopScoringThrowerSql).fetchall()
-        #self.ex(selectTopBlockingThrowerSql).fetchall()
-        #self.ex(selectTopBlockingScorerSql).fetchall()
-        #self.ex(selectTopTripleSql).fetchall()
-        #self.ex(selectTopAllRounderSql).fetchall()
+        topScoringThrower = self.ex(selectTopScoringThrowerSql).fetchall()
+        topBlockingThrower = self.ex(selectTopBlockingThrowerSql).fetchall()
+        topBlockingScorer = self.ex(selectTopBlockingScorerSql).fetchall()
+        topTriple = self.ex(selectTopTripleSql).fetchall()
+        topAllRounder = self.ex(selectTopAllRounderSql).fetchall()
 
+        for player in topScoringThrower:
+            (name, team) = self.getPlayerTeamNames(player[0], player[1])
+            topValue = player[2]
+            print "Top Scoring Thrower:", name, "(", team, ") ", "#", topValue
+
+        for player in topBlockingScorer:
+            (name, team) = self.getPlayerTeamNames(player[0], player[1])
+            topValue = player[3]
+            print "Top Blocking Scorer:", name, "(", team, ") ", "#", topValue
+
+        for player in topBlockingThrower:
+            (name, team) = self.getPlayerTeamNames(player[0], player[1])
+            topValue = player[4]
+            print "Top Blocking Thrower:", name, "(", team, ") ", "#", topValue
+
+        for player in topTriple:
+            (name, team) = self.getPlayerTeamNames(player[0], player[1])
+            topValue = player[5]
+            print "Top Triple:", name, "(", team, ") ", "#", topValue
+
+        for player in topAllRounder:
+            (name, team) = self.getPlayerTeamNames(player[0], player[1])
+            topValue = player[6]
+            print "Top All-Rounder:", name, "(", team, ") ", "#", topValue
+            
+        #topThreeSql = 'SELECT * FROM calculatedStats WHERE triple >= (SELECT MIN(triple) FROM (SELECT triple FROM calculatedStats ORDER BY triple DESC LIMIT 3)) ORDER BY triple DESC'
+        #topThree = self.ex(topThreeSql).fetchall()
+        #for player in topThree:
+        #    (name, team) = self.getPlayerTeamNames(player[0], player[1])
+        #    val = player[5]
+        #    print "Top3 Triple:", name, "(", team, ") ", "#", val
+
+    def getPlayerTeamNames(self, playerId, teamId):
+        # get the team xml
+        teamTree = self.getTeamData(teamId)
+        # get the team name
+        teamName = teamTree.find('name').text
+        # search for the player name
+        playerNameXPath = './/player[@id="%(playerId)s"]/name' % {'playerId': playerId}
+        playerName = teamTree.findall(playerNameXPath)[0].text
+
+        return (playerName, teamName)
+
+    def getPlayerUrl(self, playerId):
+        return 'http://fumbbl.com/FUMBBL.php?page=player&player_id=' + playerId
+
+    def getTeamUrl(self, teamId):
+        return 'http://fumbbl.com/FUMBBL.php?page=team&op=view&team_id=' + teamId
+
+    def printTopList(self):
+        """ in development, assumes all data has been fetched
+        """
 
 
 if __name__ == '__main__':
@@ -227,6 +291,13 @@ if __name__ == '__main__':
     #ts.processMatches()
     
     # Get data for groups
-    #groupsToGet = ('8000', '8001')
-    #ts.getGroupMatchData(groupsToGet)
+    groupsToGet = ('8011', '8341')
+    ts.getGroupMatchData(groupsToGet)
+
+    # calculate the special stats
+    ts.calculateSpecialStats()
+
+    # print out the top specials
+    ts.getTopSpecialStats()
+
 
